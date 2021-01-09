@@ -35,9 +35,7 @@ def get_items():
 
     rows = cur.fetchall()
     for row in rows:
-        for key, val in row:
-            print(key, val)
-        data.append(row)
+        data.append({'name':row[0], 'value':row[1]})
 
     return app.response_class(
         response = json.dumps(data),
