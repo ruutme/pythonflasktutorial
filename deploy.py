@@ -10,6 +10,8 @@ from flask import request
 
 import sqlite3
 
+import sqlalchemy
+
 DATABASE = 'sample.db'
 
 app = Flask(__name__)
