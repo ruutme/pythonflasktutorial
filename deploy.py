@@ -10,21 +10,33 @@ from flask import request
 
 import sqlite3
 
-import sqlalchemy
+from sqlalchemy import create_engine
+
+from sqlalchemy.ext.declarative import declarative_base
+
+from sqlalchemy.orm import sessionmaker, scoped_session
+
+from models import Item
 
 DATABASE = 'sample.db'
 
 app = Flask(__name__)
+engine = create_engine('sqlite:///' +  DATABASE)
 
-def get_db():
-    if 'db' not in g:
-        g.db = sqlite3.connect(DATABASE)
-    return g.db
+# Create base class that stores all classes representing the tables
+Base = declarative_base()
+Base.metadata.reflect(bind=engine)
 
-def teardown_db(execption):
-    db = g.pop('db')
-    if db is not None:
-        db.close()
+# Create configured session class
+Session_factory = sessionmaker(bind=engine)
+session = scoped_session(Session_factory)
+
+# Create all tables that don't exist yet
+Base.metadata.create_all(engine)
+
+@app.teardown_request
+def remove_session(ex=None):
+    session.remove()
 
 @app.route('/')
 def deploy():
@@ -37,13 +49,13 @@ def deploy():
 def create_item():
     name = request.form['name']
     value = request.form['value']
-    conn = get_db()
-    cur = conn.cursor()
-    cur.execute('INSERT INTO items (name, value) VALUES (?,?)', (name, value))
-    conn.commit()
+    
+    new_item = Item(name=name, value=value)
+    session.add(new_item)
+    session.commit()
 
     return app.response_class(
-        response = json.dumps([{'action':'Added new item'}, {'new item': cur.lastrowid}]),
+        response = json.dumps([{'action':'Added new item'}, {'new item': new_item.id}]),
         status = 200,
         mimetype = 'application/json'
     )
@@ -52,13 +64,11 @@ def create_item():
 @app.route('/items')
 def get_items():
     data = []
+    
+    rows = session.query(Item).all()
 
-    cur = get_db().cursor()
-    cur.execute('SELECT id, name, value FROM items')
-
-    rows = cur.fetchall()
     for row in rows:
-        data.append({'id': row[0], 'name': row[1], 'value': row[2]})
+        data.append({'id': row.id, 'name': row.name, 'value': row.value})
 
     return app.response_class(
         response = json.dumps(data),
@@ -69,12 +79,11 @@ def get_items():
 # read one = GET
 @app.route('/item/<int:id>', methods=['GET'])
 def get_item(id):
-    cur = get_db().cursor()
-    cur.execute('SELECT * FROM items WHERE id = ?', (id,))
 
-    item = cur.fetchone()
+    item = session.query(Item).filter(Item.id == id).first()
+    
     return app.response_class(
-        response = json.dumps([{'action':'testing'}, item]),
+        response = json.dumps([{'action':'testing'}, {'id': item.id, 'name': item.name, 'value': item.value}]),
         status = 200,
         mimetype = 'application/json'
     )
@@ -82,14 +91,11 @@ def get_item(id):
 # update one = PUT
 @app.route('/item', methods=['PUT'])
 def update_item():
-    conn = get_db()
-    cur = conn.cursor()
-
     id = request.form['id']
     value = request.form['value']
 
-    cur.execute('UPDATE items SET value = ? WHERE id = ?', (value, id))
-    conn.commit()
+    session.query(Item).filter(Item.id == id).update({'value': value}, synchronize_session='fetch')
+    session.commit()
 
     return app.response_class(
         response = json.dumps([{'action': 'Updated item'}, {'id': id}]),
@@ -97,15 +103,13 @@ def update_item():
         mimetype='application/json'
     )
 
-
 # delete one = DELETE
 @app.route('/item', methods=['DELETE'])
 def delete_item():
     id = request.form['id']
-    conn = get_db()
-    cur = conn.cursor()
-    cur.execute('DELETE FROM items WHERE id = ?',(id,))
-    conn.commit()
+
+    session.query(Item).filter(Item.id == id).delete()
+    session.commit()
 
     return app.response_class(
         response = json.dumps([{'action': 'Deleted item'}, {'id':id}]),
